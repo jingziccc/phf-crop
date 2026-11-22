@@ -10,6 +10,7 @@ import platform
 import subprocess
 import sys
 import shutil
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +34,7 @@ def pythonpath_env() -> str:
     return os.pathsep.join(parts)
 
 from top1_hotspot.adapters import load_model_adapter  # noqa: E402
+from top1_hotspot.components import hotspot_component_square_bbox  # noqa: E402
 from top1_hotspot.adaptive_stop import component_short_ratio  # noqa: E402
 from top1_hotspot.config import (  # noqa: E402
     ADAPTIVE_STOP_RATIO,
@@ -46,6 +48,8 @@ from top1_hotspot.config import (  # noqa: E402
     resolve_model_params,
 )
 from top1_hotspot.geometry import (  # noqa: E402
+    HALVING_INITIAL_AREA_RATIO,
+    HALVING_RATIO_DECAY,
     bbox_to_int_tuple,
     build_stage_targets,
     dumps_json,
@@ -65,6 +69,19 @@ HIGH_RES_TILE_THRESHOLD = int(FROZEN_CONFIG["shared"]["high_res_tile_threshold"]
 CALIBRATION_TOPMASS_ENV = "PHF_CALIBRATION_TOPMASS"
 SENSITIVITY_TOPMASS_ENV = "PHF_SENSITIVITY_TOPMASS"
 SENSITIVITY_REASON_ENV = "PHF_SENSITIVITY_REASON"
+SENSITIVITY_VARIANTS = {
+    "min224": {"min_crop_side": 224},
+    "min448": {"min_crop_side": 448},
+    "initial025": {"initial_area_ratio": 0.25},
+    "initial075": {"initial_area_ratio": 0.75},
+    "decay025": {"area_ratio_decay": 0.25},
+    "decay075": {"area_ratio_decay": 0.75},
+    "rho045": {"topmass": 0.45},
+    "rho050": {"topmass": 0.50},
+    "rho060": {"topmass": 0.60},
+    "score_mass": {"component_score": "mass"},
+    "score_no_area": {"component_score": "peak_mean"},
+}
 MANIFEST_SCHEMA_VERSION = 2
 _CODE_PROVENANCE_CACHE: dict[str, Any] | None = None
 _RUNTIME_PROVENANCE_CACHE: dict[str, Any] | None = None
@@ -149,6 +166,7 @@ def manifest_identity(
         "range": [int(start_index), int(end_index)],
         "cap": int(args.cap) if args.cap is not None else None,
         "topmass": float(args.topmass),
+        "sensitivity_variant": getattr(args, "sensitivity_variant", None),
         "localization_strategy": str(args.localization_strategy),
         "attention_question_source": str(args.attention_question_source),
         "min_crop_side": int(args.min_crop_side),
@@ -220,6 +238,23 @@ def calibration_manifest_sha256() -> str | None:
 def apply_model_defaults(args: argparse.Namespace) -> argparse.Namespace:
     calibration_override = os.environ.get(CALIBRATION_TOPMASS_ENV)
     sensitivity_override = os.environ.get(SENSITIVITY_TOPMASS_ENV)
+    variant_name = getattr(args, "sensitivity_variant", None)
+    variant = SENSITIVITY_VARIANTS[variant_name] if variant_name else {}
+    if variant_name and (
+        calibration_override is not None
+        or sensitivity_override is not None
+        or args.model != "llava"
+        or args.localization_strategy != "phf"
+    ):
+        raise ValueError("sensitivity variants require LLaVA PHF without topmass environment overrides")
+    args.initial_area_ratio = variant.get("initial_area_ratio", HALVING_INITIAL_AREA_RATIO)
+    args.area_ratio_decay = variant.get("area_ratio_decay", HALVING_RATIO_DECAY)
+    args.component_score = variant.get("component_score", "default")
+    args.stage_policy = (
+        "halve_area_ratio_until_min_crop_side"
+        if args.area_ratio_decay == HALVING_RATIO_DECAY
+        else "area_ratio_decay_until_min_crop_side"
+    )
     if calibration_override is not None and sensitivity_override is not None:
         raise RuntimeError("calibration and sensitivity topmass overrides are mutually exclusive")
     if calibration_override is not None and FROZEN_CONFIG.get("status") != "calibration_pending":
@@ -233,9 +268,9 @@ def apply_model_defaults(args: argparse.Namespace) -> argparse.Namespace:
             if calibration_override is not None
             else float(sensitivity_override)
             if sensitivity_override is not None
-            else None
+            else variant.get("topmass")
         ),
-        min_crop_side=COMMON_MIN_CROP_SIDE,
+        min_crop_side=variant.get("min_crop_side", COMMON_MIN_CROP_SIDE),
     )
     args.topmass = float(resolved["topmass"])
     args.min_crop_side = int(resolved["min_crop_side"])
@@ -257,6 +292,8 @@ def apply_model_defaults(args: argparse.Namespace) -> argparse.Namespace:
         args.method_name = f"{args.method_name}_local_{str(args.local_heatmap_bootstrap)}"
     if str(args.localization_strategy) != "phf":
         args.method_name = f"{args.method_name}_{str(args.localization_strategy)}"
+    if variant_name:
+        args.method_name = f"{args.method_name}_{variant_name}"
     return args
 
 
@@ -308,6 +345,11 @@ def parse_args() -> argparse.Namespace:
         choices=("full", "tile1024"),
         default="full",
         help="Heatmap policy for non-terminal PHF crop stages; tile1024 tiles only crops whose longest side exceeds 1024.",
+    )
+    parser.add_argument(
+        "--sensitivity-variant",
+        choices=tuple(SENSITIVITY_VARIANTS),
+        help="Change one parameter in the LLaVA sensitivity study.",
     )
     parser.add_argument("--log-every", type=int, default=25)
     parser.add_argument("--resume", action="store_true")
@@ -468,6 +510,7 @@ def build_shard_command(
     append_optional_arg(cmd, "--cap", args.cap)
     append_optional_arg(cmd, "--question-path", args.question_path)
     append_optional_arg(cmd, "--image-root", args.image_root)
+    append_optional_arg(cmd, "--sensitivity-variant", getattr(args, "sensitivity_variant", None))
     if args.resume:
         cmd.append("--resume")
     if args.allow_existing_output:
@@ -524,9 +567,10 @@ def write_multigpu_manifest(
         "gpus": parse_gpu_list(args.gpus),
         "shards": shard_infos,
         "shards_retained": bool(args.keep_shards or status != "complete"),
-        "stage_policy": "halve_area_ratio_until_min_crop_side",
-        "initial_area_ratio": 0.5,
-        "ratio_decay": 0.5,
+        "stage_policy": args.stage_policy,
+        "initial_area_ratio": args.initial_area_ratio,
+        "ratio_decay": args.area_ratio_decay,
+        "component_score": args.component_score,
         "normalize_contributions": "sum",
         "fusion": (
             "coverage_average"
@@ -929,6 +973,8 @@ def run_sample(
     targets = build_stage_targets(
         image.size,
         min_crop_side=adapter.min_crop_side,
+        initial_area_ratio=args.initial_area_ratio,
+        area_ratio_decay=args.area_ratio_decay,
     )
     stop_threshold = getattr(args, "adaptive_stop_hotspot_ratio", ADAPTIVE_STOP_RATIO)
     local_heatmap_fn = (
@@ -951,6 +997,11 @@ def run_sample(
         topmass=float(args.topmass),
         adaptive_stop_hotspot_ratio=stop_threshold,
         local_heatmap_fn=local_heatmap_fn,
+        stage_candidate_scorer=(
+            partial(hotspot_component_square_bbox, component_score=args.component_score)
+            if args.component_score != "default"
+            else None
+        ),
     )
 
     final_stage = stages[-1]
@@ -1039,7 +1090,9 @@ def run_sample(
                 for stage in stages
             ],
             "qpes_attention_question_source": str(args.attention_question_source),
-            "qpes_multistage_ratio_policy": "halve_area_ratio_until_min_crop_side",
+            "qpes_multistage_ratio_policy": args.stage_policy,
+            "qpes_sensitivity_variant": getattr(args, "sensitivity_variant", None),
+            "qpes_component_score": args.component_score,
             "qpes_multistage_ratios": [
                 float(stage["target_ratio"])
                 for stage in stages
@@ -1117,9 +1170,10 @@ def write_manifest(
         "scorer_contract_version": SCORER_CONTRACT_VERSION,
         "gpu": args.gpu,
         "min_crop_side": int(adapter.min_crop_side),
-        "stage_policy": "halve_area_ratio_until_min_crop_side",
-        "initial_area_ratio": 0.5,
-        "ratio_decay": 0.5,
+        "stage_policy": args.stage_policy,
+        "initial_area_ratio": args.initial_area_ratio,
+        "ratio_decay": args.area_ratio_decay,
+        "component_score": args.component_score,
         "normalize_contributions": "sum",
         "fusion": (
             "coverage_average"

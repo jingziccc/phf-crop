@@ -59,10 +59,11 @@ python code/tools/validate_frozen_phf_contract.py
 | [code/scripts/](code/scripts/) | Inference, ViCrop baselines, and ablation runners |
 | [code/runtime/](code/runtime/) | Model utilities and task-specific scoring |
 | [code/tools/](code/tools/) | Scoring, analysis, and implementation checks |
+| [code/experiments/](code/experiments/) | Same-scale random-position control and grouped paired intervals |
 | [visualization/](visualization/) | Notebook source and the interactive viewer template |
 | [docs/](docs/) | Method, evaluation protocol, and ablations |
 
-Run outputs, precomputed predictions, result tables, visualization exports, benchmark files, and model weights are kept outside the release. See the [reproduction guide](docs/reproducibility.md) for input and scoring details.
+See [Supplementary experiments](docs/supplementary_experiments.md) for one-factor sensitivity, same-scale random crops, and paired intervals. Run outputs, precomputed predictions, result tables, visualization exports, benchmark files, and model weights are kept outside the release. See the [reproduction guide](docs/reproducibility.md) for input and scoring details.
 
 ## Citation
 

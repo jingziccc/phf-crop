@@ -136,6 +136,7 @@ def hotspot_component_square_bbox(
     side: int,
     *,
     topmass: float,
+    component_score: str = "default",
 ) -> dict[str, Any]:
     array = sanitize_heatmap(heatmap)
     heatmap_height, heatmap_width = array.shape
@@ -144,6 +145,15 @@ def hotspot_component_square_bbox(
         mask_info["mask"],
         array,
     )
+    if component_score != "default":
+        scores = {
+            "mass": lambda component: component["mass"],
+            "peak_mean": lambda component: component["peak"] * component["mean"],
+        }
+        score = scores[component_score]
+        for component in components:
+            component["score"] = score(component)
+        components.sort(key=lambda component: component["score"], reverse=True)
     if not components:
         fallback = max_heat_square_bbox(array, image_size, side)
         return {

@@ -168,14 +168,19 @@ def max_heat_square_bbox(
 def build_stage_targets(
     image_size: tuple[int, int],
     min_crop_side: int,
+    *,
+    initial_area_ratio: float = HALVING_INITIAL_AREA_RATIO,
+    area_ratio_decay: float = HALVING_RATIO_DECAY,
 ) -> list[dict[str, Any]]:
+    if not 0 < initial_area_ratio <= 1 or not 0 < area_ratio_decay < 1:
+        raise ValueError("expected initial_area_ratio in (0, 1] and area_ratio_decay in (0, 1)")
     image_width, image_height = image_size
     image_area = float(image_width * image_height)
     short_side = min(image_width, image_height)
     final_side = int(max(1, min(min_crop_side, short_side)))
     targets: list[dict[str, Any]] = []
 
-    ratio = HALVING_INITIAL_AREA_RATIO
+    ratio = initial_area_ratio
     for _ in range(MAX_HALVING_STAGES):
         raw_side = math.sqrt(image_area * float(ratio))
         if raw_side < float(min_crop_side):
@@ -188,7 +193,7 @@ def build_stage_targets(
                 "side": int(round(min(raw_side, short_side))),
             }
         )
-        ratio *= HALVING_RATIO_DECAY
+        ratio *= area_ratio_decay
 
     if not targets or int(targets[-1]["side"]) != final_side:
         targets.append(
