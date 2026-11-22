@@ -1,12 +1,35 @@
-# PHF-Crop
+<h1 align="center">PHF-Crop</h1>
 
-**Progressive Coarse-to-Fine Heatmap Fusion Cropping for Visual Question Answering in MLLMs**
+<p align="center">
+  <strong>Progressive Coarse-to-Fine Heatmap Fusion Cropping<br>for Visual Question Answering in MLLMs</strong>
+</p>
 
-Zhenghai Chen, Chungang Yan, Junli Wang, Zhanpeng Ni, Ruiyuan Duan, and Yang Ruihua
+<p align="center">
+  Zhenghai Chen · Chungang Yan · Junli Wang · Zhanpeng Ni · Ruiyuan Duan · Yang Ruihua
+</p>
 
-Findings of the Association for Computational Linguistics: EACL 2027
+<p align="center">
+  <a href="#news"><img alt="EACL 2027 Findings" src="https://img.shields.io/badge/EACL_2027-Findings-4b65d1"></a>
+  <a href="#installation"><img alt="Python 3.10" src="https://img.shields.io/badge/Python-3.10-3776ab"></a>
+</p>
 
-PHF-Crop is a training-free inference method for visual question answering when the evidence occupies a small part of an image. It follows a single sequence of progressively smaller crops, recomputes question-conditioned attention on each local view, and aligns and fuses the heatmaps in the original image coordinates. The selected crop is then used to answer the question. The implementation supports LLaVA-1.5, InstructBLIP, and Qwen2.5-VL.
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="docs/supplementary_experiments.md">Supplementary experiments</a> ·
+  <a href="#citation">Citation</a>
+</p>
+
+## News
+
+🎉 **November 2026** — PHF-Crop was accepted to **Findings of EACL 2027**!
+
+## Overview
+
+PHF-Crop is a training-free method for visual question answering when the evidence occupies a small part of an image. It follows a single coarse-to-fine crop sequence, recomputes question-conditioned attention on each cropped view, and fuses the heatmaps in the original image coordinates. The fused heatmap guides the next crop. The implementation supports LLaVA-1.5, InstructBLIP, and Qwen2.5-VL.
+
+<p align="center">
+  <img src="docs/phf-crop-pipeline.png" width="900" alt="PHF-Crop pipeline showing initial heatmap generation, crop selection, local attention recomputation, and aligned heatmap fusion">
+</p>
 
 ## Installation
 
