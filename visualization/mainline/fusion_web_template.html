@@ -1,0 +1,558 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>PHF-Crop Fusion View</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #f7f8fa; color: #20242b; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .app { width: 100vw; height: 100vh; display: grid; grid-template-columns: minmax(0, 1fr) 244px; }
+    .stage { position: relative; min-width: 0; background: #fff; }
+    canvas { display: block; width: 100%; height: 100%; }
+    #gl { cursor: grab; }
+    #gl:active { cursor: grabbing; }
+    .hidden { display: none; }
+    .text-view { position: absolute; inset: 0; overflow: auto; padding: 44px 56px; background: #fff; font-family: "Times New Roman", Tinos, Georgia, serif; }
+    .text-card { max-width: 1080px; margin: 0 auto; border: 1px solid #e2e6ec; border-radius: 10px; background: #fff; box-shadow: 0 12px 32px rgba(17,24,39,.08); }
+    .text-row { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 18px; padding: 18px 22px; border-bottom: 1px solid #e8ebf0; }
+    .text-row:last-child { border-bottom: 0; }
+    .text-label { color: #111827; font-weight: 700; font-size: 18px; }
+    .text-value { color: #111827; font-size: 18px; line-height: 1.42; white-space: pre-wrap; word-break: break-word; }
+    .text-meta { margin-top: 8px; color: #6b7280; font-size: 15px; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+    .panel { padding: 18px 16px; border-left: 1px solid #dfe2e7; background: #f7f8fa; overflow-y: auto; }
+    .panel h1 { margin: 0 0 16px; font-size: 14px; font-weight: 650; letter-spacing: 0; }
+    .group { margin: 0 0 15px; }
+    .group label { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 11px; color: #5a606a; }
+    .group output { color: #20242b; font-variant-numeric: tabular-nums; }
+    input[type="range"] { width: 100%; accent-color: #ff0000; }
+    .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 3px; background: #e9ebef; border-radius: 6px; }
+    .seg.three { grid-template-columns: 1fr 1fr 1fr; }
+    .seg.four { grid-template-columns: repeat(4, 1fr); }
+    button { min-height: 32px; padding: 6px 9px; border: 1px solid #d2d6dc; border-radius: 5px; background: #fff; color: #292d34; font: inherit; font-size: 11px; cursor: pointer; }
+    button:hover { border-color: #9ba1aa; }
+    .seg button { border: 0; background: transparent; }
+    .seg button.active { background: #fff; color: #e00000; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+    .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+    .wide { grid-column: 1 / -1; }
+    .hint { margin-top: 14px; font-size: 10px; line-height: 1.45; color: #7a8089; }
+    @media (max-width: 820px) {
+      .app { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) auto; }
+      .panel { max-height: 260px; border-left: 0; border-top: 1px solid #dfe2e7; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <main class="stage"><canvas id="gl"></canvas><canvas id="boxes2d" class="hidden"></canvas><section id="textPanel" class="text-view hidden"></section></main>
+    <aside class="panel">
+      <h1>Fusion view</h1>
+      <div class="group"><div class="seg four"><button id="fusionView" class="active">Fusion</button><button id="boxesView">Stage boxes</button><button id="detailsView">Box details</button><button id="textView">Text</button></div></div>
+      <div class="group hidden" id="detailGroup"><label>Detail stage <output id="detailOut"></output></label><input id="detailStage" type="range" min="1" max="1" value="1" step="1"></div>
+      <div class="group hidden" id="detailStyleGroup"><div class="seg"><button id="gridDetail" class="active">Grid</button><button id="smoothDetail">Smooth</button></div></div>
+      <div class="group" id="modeGroup"><div class="seg"><button id="heatMode" class="active">Heatmap</button><button id="overlayMode">Overlay</button></div></div>
+      <div class="group" id="fusionFinalGroup"><div class="seg"><button id="hideFinalLayer" class="active">Hide final</button><button id="showFinalLayer">Show final</button></div></div>
+      <div class="group fusion-control"><label>Horizontal angle <output id="yawOut"></output></label><input id="yaw" type="range" min="8" max="82" value="54" step="1"></div>
+      <div class="group fusion-control"><label>Vertical angle <output id="pitchOut"></output></label><input id="pitch" type="range" min="-90" max="90" value="18" step="1"></div>
+      <div class="group fusion-control"><label>Layer spacing <output id="gapOut"></output></label><input id="gap" type="range" min="0" max="2.4" value="1.25" step="0.05"></div>
+      <div class="group fusion-control"><label>Perspective <output id="fovOut"></output></label><input id="fov" type="range" min="18" max="65" value="36" step="1"></div>
+      <div class="group fusion-control"><label>Texture opacity <output id="alphaOut"></output></label><input id="alpha" type="range" min="0.25" max="1" value="1" step="0.05"></div>
+      <div class="group actions" id="fusionActionGroup">
+        <button id="reset">Reset view</button><button id="fit">Fit scene</button>
+        <button id="topDown" class="wide">Top-down view</button>
+      </div>
+      <div class="group actions" id="exportActionGroup">
+        <button id="svg1">SVG 1x</button><button id="svg2">SVG 2x</button>
+        <button id="svg4" class="wide">SVG 4x</button>
+        <button id="saveOriginal">Original image</button><button id="saveCrop">Final crop</button>
+      </div>
+      <div class="hint">Drag to rotate. Use the wheel to zoom. Every local plane retains its crop position and aspect ratio in original-image coordinates.</div>
+    </aside>
+  </div>
+  <script>
+    const data = __PHF_PAYLOAD__;
+    const canvas = document.getElementById('gl');
+    const boxCanvas = document.getElementById('boxes2d');
+    const textPanel = document.getElementById('textPanel');
+    const boxCtx = boxCanvas.getContext('2d');
+    const gl = canvas.getContext('webgl', {alpha: true, antialias: true, preserveDrawingBuffer: true});
+    if (!gl) throw new Error('WebGL is unavailable in this browser.');
+
+    const vertexSource = 'attribute vec3 p;attribute vec2 uv;uniform mat4 mvp;varying vec2 vuv;void main(){gl_Position=mvp*vec4(p,1.0);vuv=uv;}';
+    const fragmentSource = 'precision mediump float;varying vec2 vuv;uniform sampler2D tex;uniform float alpha;uniform vec3 tint;void main(){vec4 c=texture2D(tex,vuv);gl_FragColor=vec4(c.rgb*tint,alpha*c.a);}';
+    function compile(type, source) { const shader = gl.createShader(type); gl.shaderSource(shader, source); gl.compileShader(shader); if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(shader)); return shader; }
+    const program = gl.createProgram();
+    gl.attachShader(program, compile(gl.VERTEX_SHADER, vertexSource));
+    gl.attachShader(program, compile(gl.FRAGMENT_SHADER, fragmentSource));
+    gl.linkProgram(program);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program));
+    gl.useProgram(program);
+    const pLoc = gl.getAttribLocation(program, 'p');
+    const uvLoc = gl.getAttribLocation(program, 'uv');
+    const mvpLoc = gl.getUniformLocation(program, 'mvp');
+    const alphaLoc = gl.getUniformLocation(program, 'alpha');
+    const tintLoc = gl.getUniformLocation(program, 'tint');
+    const buffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.enableVertexAttribArray(pLoc);
+    gl.enableVertexAttribArray(uvLoc);
+    gl.vertexAttribPointer(pLoc, 3, gl.FLOAT, false, 20, 0);
+    gl.vertexAttribPointer(uvLoc, 2, gl.FLOAT, false, 20, 12);
+
+    const state = {view: 'fusion', yaw: 54, pitch: 18, gap: 1.25, fov: 36, alpha: 1, zoom: 1, mode: 'heat', showFinalLayer: false, detailIndex: 0, detailStyle: 'grid'};
+    const textures = data.layers.map(() => ({heat: null, overlay: null, heatImage: null}));
+    const detailImages = new Map();
+    const boxImage = new Image();
+    boxImage.onload = () => { buildOverlayTextures(); render(); };
+    boxImage.src = data.originalUri || (data.layers.find(layer => layer.overlayUri) || data.layers[data.layers.length - 1]).overlayUri || data.layers[data.layers.length - 1].heatUri;
+    function makeTextureFromImage(image) {
+      const texture = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+      return texture;
+    }
+    function loadImage(uri, done) {
+      const image = new Image();
+      image.onload = () => done(image);
+      image.src = uri;
+    }
+    function buildOverlayTexture(index) {
+      const entry = textures[index];
+      const layer = data.layers[index];
+      if (entry.overlay || !entry.heatImage || !boxImage.complete || !boxImage.naturalWidth) return;
+      const heatImage = entry.heatImage;
+      const width = Math.max(2, heatImage.naturalWidth || heatImage.width);
+      const height = Math.max(2, heatImage.naturalHeight || heatImage.height);
+      const work = document.createElement('canvas');
+      work.width = width;
+      work.height = height;
+      const ctx = work.getContext('2d');
+      const scaleX = boxImage.naturalWidth / data.imageWidth;
+      const scaleY = boxImage.naturalHeight / data.imageHeight;
+      const sx = Math.max(0, Math.round(layer.bbox[0] * scaleX));
+      const sy = Math.max(0, Math.round(layer.bbox[1] * scaleY));
+      const sw = Math.max(1, Math.round((layer.bbox[2] - layer.bbox[0]) * scaleX));
+      const sh = Math.max(1, Math.round((layer.bbox[3] - layer.bbox[1]) * scaleY));
+      ctx.drawImage(boxImage, sx, sy, Math.min(sw, boxImage.naturalWidth - sx), Math.min(sh, boxImage.naturalHeight - sy), 0, 0, width, height);
+      const base = ctx.getImageData(0, 0, width, height);
+      ctx.clearRect(0, 0, width, height);
+      ctx.drawImage(heatImage, 0, 0, width, height);
+      const heat = ctx.getImageData(0, 0, width, height);
+      const alpha = 0.58;
+      for (let i = 0; i < base.data.length; i += 4) {
+        base.data[i] = base.data[i] * (1 - alpha) + heat.data[i] * alpha;
+        base.data[i + 1] = base.data[i + 1] * (1 - alpha) + heat.data[i + 1] * alpha;
+        base.data[i + 2] = base.data[i + 2] * (1 - alpha) + heat.data[i + 2] * alpha;
+        base.data[i + 3] = 255;
+      }
+      ctx.putImageData(base, 0, 0);
+      entry.overlay = makeTextureFromImage(work);
+      render();
+    }
+    function buildOverlayTextures() {
+      data.layers.forEach((_, index) => buildOverlayTexture(index));
+    }
+    function ensureDetailImage(index) {
+      const detail = currentStageDetail();
+      if (!detail) return null;
+      if (detailImages.has(index)) return detailImages.get(index);
+      const heatUri = detail.heatUri || (Number.isInteger(detail.heatLayerIndex) && data.layers[detail.heatLayerIndex] ? data.layers[detail.heatLayerIndex].heatUri : null);
+      if (!heatUri) return null;
+      detailImages.set(index, null);
+      loadImage(heatUri, image => {
+        detailImages.set(index, image);
+        render();
+      });
+      return null;
+    }
+    data.layers.forEach((layer, index) => {
+      loadImage(layer.heatUri, image => {
+        textures[index].heatImage = image;
+        textures[index].heat = makeTextureFromImage(image);
+        buildOverlayTexture(index);
+        render();
+      });
+      if (layer.overlayUri) loadImage(layer.overlayUri, image => {
+        textures[index].overlay = makeTextureFromImage(image);
+        render();
+      });
+    });
+
+    function identity() { return new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]); }
+    function multiply(a, b) { const out = new Float32Array(16); for (let c=0;c<4;c++) for (let r=0;r<4;r++) out[c*4+r]=a[r]*b[c*4]+a[4+r]*b[c*4+1]+a[8+r]*b[c*4+2]+a[12+r]*b[c*4+3]; return out; }
+    function rotateX(angle) { const c=Math.cos(angle),s=Math.sin(angle); return new Float32Array([1,0,0,0, 0,c,s,0, 0,-s,c,0, 0,0,0,1]); }
+    function rotateY(angle) { const c=Math.cos(angle),s=Math.sin(angle); return new Float32Array([c,0,-s,0, 0,1,0,0, s,0,c,0, 0,0,0,1]); }
+    function translate(x,y,z) { const matrix=identity(); matrix[12]=x; matrix[13]=y; matrix[14]=z; return matrix; }
+    function perspective(fov, aspect, near, far) { const f=1/Math.tan(fov/2), nf=1/(near-far); return new Float32Array([f/aspect,0,0,0, 0,f,0,0, 0,0,(far+near)*nf,-1, 0,0,2*far*near*nf,0]); }
+    function sceneMvp() {
+      const aspect = canvas.width / canvas.height;
+      const depth = data.layers[data.layers.length - 1].depth * state.gap;
+      const span = Math.max(data.imageWidth, data.imageHeight, depth);
+      const distance = span * 2.05 / state.zoom;
+      let view = translate(0, 0, -distance);
+      view = multiply(view, rotateX(state.pitch * Math.PI / 180));
+      view = multiply(view, rotateY(state.yaw * Math.PI / 180));
+      return multiply(perspective(state.fov * Math.PI / 180, aspect, 1, span * 12 + 100), view);
+    }
+    function quad(bbox, z) {
+      const x1=bbox[0]-data.imageWidth/2, x2=bbox[2]-data.imageWidth/2;
+      const y1=data.imageHeight/2-bbox[1], y2=data.imageHeight/2-bbox[3];
+      return new Float32Array([x1,y2,z,0,0, x2,y2,z,1,0, x1,y1,z,0,1, x1,y1,z,0,1, x2,y2,z,1,0, x2,y1,z,1,1]);
+    }
+    function lineQuad(bbox, z) {
+      const x1=bbox[0]-data.imageWidth/2, x2=bbox[2]-data.imageWidth/2;
+      const y1=data.imageHeight/2-bbox[1], y2=data.imageHeight/2-bbox[3];
+      return new Float32Array([x1,y2,z,0,0, x2,y2,z,0,0, x2,y1,z,0,0, x1,y1,z,0,0]);
+    }
+    const whiteTexture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, whiteTexture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([255,255,255,255]));
+
+    function resizeCanvas(targetCanvas, exportScale = null) {
+      const dpr = exportScale || Math.min(2, window.devicePixelRatio || 1);
+      const width = Math.max(2, Math.floor(targetCanvas.clientWidth * dpr));
+      const height = Math.max(2, Math.floor(targetCanvas.clientHeight * dpr));
+      if (targetCanvas.width !== width || targetCanvas.height !== height) { targetCanvas.width = width; targetCanvas.height = height; }
+    }
+    function renderFusion(exportScale = null, transparentBackground = false) {
+      resizeCanvas(canvas, exportScale);
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.clearColor(1, 1, 1, transparentBackground ? 0 : 1);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      gl.enable(gl.DEPTH_TEST);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.uniformMatrix4fv(mvpLoc, false, sceneMvp());
+      const centerDepth = data.layers[data.layers.length - 1].depth * state.gap / 2;
+      data.layers.forEach((layer, index) => {
+        if (layer.final && !state.showFinalLayer) return;
+        const z = layer.depth * state.gap - centerDepth;
+        const texture = textures[index][state.mode] || ((layer.final && state.mode === 'overlay') ? null : textures[index].heat);
+        if (texture) {
+          gl.bindTexture(gl.TEXTURE_2D, texture);
+          gl.bufferData(gl.ARRAY_BUFFER, quad(layer.bbox, z), gl.STATIC_DRAW);
+          gl.uniform1f(alphaLoc, state.alpha);
+          gl.uniform3f(tintLoc, 1, 1, 1);
+          gl.drawArrays(gl.TRIANGLES, 0, 6);
+        }
+        gl.bindTexture(gl.TEXTURE_2D, whiteTexture);
+        gl.bufferData(gl.ARRAY_BUFFER, lineQuad(layer.bbox, z + 0.8), gl.STATIC_DRAW);
+        gl.uniform1f(alphaLoc, layer.final ? 1 : 0.48);
+        if (layer.final) gl.uniform3f(tintLoc, 1, 0, 0); else gl.uniform3f(tintLoc, 0.38, 0.41, 0.46);
+        gl.lineWidth(1);
+        gl.drawArrays(gl.LINE_LOOP, 0, 4);
+      });
+    }
+    function defaultBoxRecords() {
+      if (Array.isArray(data.boxes) && data.boxes.length) return data.boxes;
+      return data.layers
+        .filter((layer, index) => index > 0 || layer.final)
+        .filter(layer => !(layer.bbox[0] === 0 && layer.bbox[1] === 0 && layer.bbox[2] === data.imageWidth && layer.bbox[3] === data.imageHeight && !layer.final))
+        .map((layer, index) => ({bbox: layer.bbox, label: layer.final ? 'final' : 'S' + (index + 1), final: !!layer.final}));
+    }
+    function currentStageDetail() {
+      const details = Array.isArray(data.stageDetails) ? data.stageDetails : [];
+      if (!details.length) return null;
+      const index = Math.max(0, Math.min(details.length - 1, state.detailIndex));
+      return details[index];
+    }
+    function activeBoxRecords() {
+      if (state.view === 'details') {
+        const detail = currentStageDetail();
+        return detail && Array.isArray(detail.boxes) ? detail.boxes : [];
+      }
+      return defaultBoxRecords();
+    }
+    function escapeHtml(value) {
+      return String(value || '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+    }
+    function answerBlock(record) {
+      const item = record || {};
+      const answer = escapeHtml(item.answer || '');
+      const source = escapeHtml(item.source || 'unknown');
+      const score = escapeHtml(item.score || 'n/a');
+      return answer + '<div class="text-meta">source=' + source + '; score=' + score + '</div>';
+    }
+    function renderTextPanel() {
+      const text = data.text || {};
+      const rows = [
+        ['Sample', escapeHtml(text.sample || 'sample')],
+        ['Question', escapeHtml(text.question || '')],
+      ];
+      if (text.groundTruth) rows.push(['Ground truth', escapeHtml(text.groundTruth)]);
+      rows.push(['Original NoCrop result', answerBlock(text.nocrop)]);
+      rows.push(['Current PHF-Crop result', answerBlock(text.current || text.phf)]);
+      textPanel.innerHTML = '<div class="text-card">' + rows.map(row =>
+        '<div class="text-row"><div class="text-label">' + row[0] + '</div><div class="text-value">' + row[1] + '</div></div>'
+      ).join('') + '</div>';
+    }
+    function drawRecords(records, offsetX, offsetY, scale, width, isDetail) {
+      records.forEach((record, index) => {
+        const bbox = record.bbox;
+        const x = offsetX + bbox[0] * scale;
+        const y = offsetY + bbox[1] * scale;
+        const w = Math.max(1, (bbox[2] - bbox[0]) * scale);
+        const h = Math.max(1, (bbox[3] - bbox[1]) * scale);
+        const selected = !!(record.final || record.selected);
+        const colors = ['#0072B2', '#009E73', '#CC79A7', '#56B4E9', '#E69F00', '#6B7280'];
+        const color = selected ? '#FF0000' : (isDetail ? '#FFFFFF' : colors[index % colors.length]);
+        const lineWidth = selected ? Math.max(3, Math.round(width / 620)) : Math.max(2, Math.round(width / 720));
+        const dash = Math.max(10, Math.round(width / 170));
+        const gap = Math.max(6, Math.round(dash * 0.65));
+        boxCtx.save();
+        boxCtx.strokeStyle = color;
+        boxCtx.lineWidth = lineWidth;
+        boxCtx.lineJoin = 'round';
+        boxCtx.setLineDash(selected ? [] : [dash, gap]);
+        boxCtx.globalAlpha = selected ? 1 : 0.96;
+        if (isDetail && !selected) {
+          boxCtx.shadowColor = 'rgba(0,0,0,0.58)';
+          boxCtx.shadowBlur = Math.max(1, lineWidth);
+        }
+        boxCtx.strokeRect(x, y, w, h);
+        boxCtx.restore();
+      });
+    }
+    function renderBoxes(exportScale = null, transparentBackground = false) {
+      const isDetail = state.view === 'details';
+      const tightExport = exportScale !== null;
+      const detail = isDetail ? currentStageDetail() : null;
+      const detailImage = isDetail ? ensureDetailImage(state.detailIndex) : null;
+      const logicalWidth = isDetail && detail ? Number(detail.heatmapWidth || (detailImage && detailImage.naturalWidth) || data.imageWidth) : data.imageWidth;
+      const logicalHeight = isDetail && detail ? Number(detail.heatmapHeight || (detailImage && detailImage.naturalHeight) || data.imageHeight) : data.imageHeight;
+      if (exportScale) {
+        if (isDetail) {
+          const baseSide = 2048;
+          const detailScale = Math.max(1, baseSide / Math.max(logicalWidth, logicalHeight)) * exportScale;
+          boxCanvas.width = Math.max(2, Math.floor(logicalWidth * detailScale));
+          boxCanvas.height = Math.max(2, Math.floor(logicalHeight * detailScale));
+        } else {
+          boxCanvas.width = Math.max(2, Math.floor(data.imageWidth * exportScale));
+          boxCanvas.height = Math.max(2, Math.floor(data.imageHeight * exportScale));
+        }
+      } else {
+        resizeCanvas(boxCanvas);
+      }
+      const width = boxCanvas.width;
+      const height = boxCanvas.height;
+      boxCtx.clearRect(0, 0, width, height);
+      if (!transparentBackground) {
+        boxCtx.fillStyle = '#ffffff';
+        boxCtx.fillRect(0, 0, width, height);
+      }
+      const scale = tightExport ? (width / logicalWidth) : Math.min(width / logicalWidth, height / logicalHeight);
+      const drawWidth = logicalWidth * scale;
+      const drawHeight = logicalHeight * scale;
+      const offsetX = tightExport ? 0 : (width - drawWidth) / 2;
+      const offsetY = tightExport ? 0 : (height - drawHeight) / 2;
+      if (isDetail) {
+        const smoothHeatmap = state.detailStyle === 'smooth';
+        if (state.mode === 'overlay' && boxImage.complete && boxImage.naturalWidth && detail) {
+          const frame = Array.isArray(detail.heatmapFrameBBox) ? detail.heatmapFrameBBox : [0, 0, data.imageWidth, data.imageHeight];
+          const scaleX = boxImage.naturalWidth / data.imageWidth;
+          const scaleY = boxImage.naturalHeight / data.imageHeight;
+          const sx = Math.max(0, Math.round(frame[0] * scaleX));
+          const sy = Math.max(0, Math.round(frame[1] * scaleY));
+          const sw = Math.max(1, Math.round((frame[2] - frame[0]) * scaleX));
+          const sh = Math.max(1, Math.round((frame[3] - frame[1]) * scaleY));
+          boxCtx.imageSmoothingEnabled = true;
+          boxCtx.drawImage(
+            boxImage,
+            sx,
+            sy,
+            Math.min(sw, boxImage.naturalWidth - sx),
+            Math.min(sh, boxImage.naturalHeight - sy),
+            offsetX,
+            offsetY,
+            drawWidth,
+            drawHeight
+          );
+          if (detailImage) {
+            boxCtx.save();
+            boxCtx.globalAlpha = 0.62;
+            boxCtx.imageSmoothingEnabled = smoothHeatmap;
+            boxCtx.drawImage(detailImage, offsetX, offsetY, drawWidth, drawHeight);
+            boxCtx.restore();
+          }
+        } else {
+          boxCtx.imageSmoothingEnabled = smoothHeatmap;
+          if (detailImage) boxCtx.drawImage(detailImage, offsetX, offsetY, drawWidth, drawHeight);
+        }
+      } else if (boxImage.complete) {
+        boxCtx.imageSmoothingEnabled = true;
+        boxCtx.drawImage(boxImage, offsetX, offsetY, drawWidth, drawHeight);
+      }
+      drawRecords(activeBoxRecords(), offsetX, offsetY, scale, width, isDetail);
+    }
+    function render(exportScale = null, transparentBackground = false) {
+      if (state.view === 'text') return;
+      if (state.view === 'boxes' || state.view === 'details') renderBoxes(exportScale, transparentBackground);
+      else renderFusion(exportScale, transparentBackground);
+    }
+
+    window.addEventListener('resize', () => render());
+    let dragging=false, lastX=0, lastY=0;
+    canvas.addEventListener('pointerdown', event => { dragging=true; lastX=event.clientX; lastY=event.clientY; canvas.setPointerCapture(event.pointerId); });
+    canvas.addEventListener('pointerup', () => dragging=false);
+    canvas.addEventListener('pointermove', event => { if (!dragging) return; state.yaw += (event.clientX-lastX)*.22; state.pitch=Math.max(-90,Math.min(90,state.pitch+(event.clientY-lastY)*.18)); lastX=event.clientX; lastY=event.clientY; syncControls(); render(); });
+    canvas.addEventListener('wheel', event => { event.preventDefault(); state.zoom=Math.max(.45,Math.min(3,state.zoom*Math.exp(-event.deltaY*.001))); render(); }, {passive:false});
+
+    function bind(id, key, format) {
+      const input=document.getElementById(id), output=document.getElementById(id+'Out');
+      input.oninput=()=>{ state[key]=Number(input.value); output.textContent=format(state[key]); render(); };
+      input.value=state[key]; output.textContent=format(state[key]);
+    }
+    bind('yaw','yaw',value=>Math.round(value)+' deg');
+    bind('pitch','pitch',value=>Math.round(value)+' deg');
+    bind('gap','gap',value=>value.toFixed(2)+'x');
+    bind('fov','fov',value=>Math.round(value)+' deg');
+    bind('alpha','alpha',value=>Math.round(value*100)+'%');
+    const detailInput = document.getElementById('detailStage');
+    const detailOut = document.getElementById('detailOut');
+    function syncDetailControl() {
+      const details = Array.isArray(data.stageDetails) ? data.stageDetails : [];
+      detailInput.max = Math.max(1, details.length);
+      detailInput.value = Math.min(details.length || 1, state.detailIndex + 1);
+      const detail = currentStageDetail();
+      detailOut.textContent = detail ? detail.label + ' (' + (detail.boxes || []).length + '/' + detail.componentCount + ')' : 'n/a';
+    }
+    detailInput.oninput = () => { state.detailIndex = Number(detailInput.value) - 1; syncDetailControl(); render(); };
+    syncDetailControl();
+    function syncControls() { ['yaw','pitch','gap','fov','alpha'].forEach(id => { const input=document.getElementById(id); input.value=state[id]; document.getElementById(id+'Out').textContent = id==='gap' ? Number(state[id]).toFixed(2)+'x' : id==='alpha' ? Math.round(state[id]*100)+'%' : Math.round(state[id])+' deg'; }); }
+    function setMode(name) { state.mode=name; document.getElementById('heatMode').classList.toggle('active',name==='heat'); document.getElementById('overlayMode').classList.toggle('active',name==='overlay'); render(); }
+    function setFinalLayerVisible(value) {
+      state.showFinalLayer = !!value;
+      document.getElementById('hideFinalLayer').classList.toggle('active', !state.showFinalLayer);
+      document.getElementById('showFinalLayer').classList.toggle('active', state.showFinalLayer);
+      render();
+    }
+    function setDetailStyle(name) {
+      state.detailStyle = name;
+      document.getElementById('gridDetail').classList.toggle('active', name === 'grid');
+      document.getElementById('smoothDetail').classList.toggle('active', name === 'smooth');
+      render();
+    }
+    function setView(name) {
+      state.view = name;
+      canvas.classList.toggle('hidden', name !== 'fusion');
+      boxCanvas.classList.toggle('hidden', !(name === 'boxes' || name === 'details'));
+      textPanel.classList.toggle('hidden', name !== 'text');
+      document.getElementById('fusionView').classList.toggle('active', name === 'fusion');
+      document.getElementById('boxesView').classList.toggle('active', name === 'boxes');
+      document.getElementById('detailsView').classList.toggle('active', name === 'details');
+      document.getElementById('textView').classList.toggle('active', name === 'text');
+      document.getElementById('detailGroup').classList.toggle('hidden', name !== 'details');
+      document.getElementById('detailStyleGroup').classList.toggle('hidden', name !== 'details');
+      document.getElementById('modeGroup').classList.toggle('hidden', !(name === 'fusion' || name === 'details'));
+      document.getElementById('fusionFinalGroup').classList.toggle('hidden', name !== 'fusion');
+      document.querySelectorAll('.fusion-control').forEach(element => element.classList.toggle('hidden', name !== 'fusion'));
+      document.getElementById('fusionActionGroup').classList.toggle('hidden', name !== 'fusion');
+      document.getElementById('exportActionGroup').classList.toggle('hidden', name === 'text');
+      syncDetailControl();
+      if (name === 'text') renderTextPanel();
+      render();
+    }
+    document.getElementById('fusionView').onclick=()=>setView('fusion');
+    document.getElementById('boxesView').onclick=()=>setView('boxes');
+    document.getElementById('detailsView').onclick=()=>setView('details');
+    document.getElementById('textView').onclick=()=>setView('text');
+    document.getElementById('gridDetail').onclick=()=>setDetailStyle('grid');
+    document.getElementById('smoothDetail').onclick=()=>setDetailStyle('smooth');
+    document.getElementById('heatMode').onclick=()=>setMode('heat');
+    document.getElementById('overlayMode').onclick=()=>setMode('overlay');
+    document.getElementById('hideFinalLayer').onclick=()=>setFinalLayerVisible(false);
+    document.getElementById('showFinalLayer').onclick=()=>setFinalLayerVisible(true);
+    document.getElementById('reset').onclick=()=>{ Object.assign(state,{yaw:54,pitch:18,gap:1.25,fov:36,alpha:1,zoom:1}); syncControls(); render(); };
+    document.getElementById('fit').onclick=()=>{ state.zoom=1; render(); };
+    document.getElementById('topDown').onclick=()=>{ Object.assign(state,{yaw:0,pitch:90,gap:0,fov:28,zoom:1}); syncControls(); render(); };
+    function exportSvg(scale) {
+      render(scale, true);
+      const activeCanvas = (state.view === 'boxes' || state.view === 'details') ? boxCanvas : canvas;
+      const width = activeCanvas.width;
+      const height = activeCanvas.height;
+      const imageUri = activeCanvas.toDataURL('image/png');
+      const svg = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<svg xmlns="http://www.w3.org/2000/svg" width="' + width + '" height="' + height + '" viewBox="0 0 ' + width + ' ' + height + '">',
+        '<title>PHF-Crop multiscale fusion view</title>',
+        '<image href="' + imageUri + '" x="0" y="0" width="' + width + '" height="' + height + '"/>',
+        '</svg>'
+      ].join('\n');
+      const blob = new Blob([svg], {type: 'image/svg+xml;charset=utf-8'});
+      const href = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.download = 'phf_crop_' + state.view + '_' + scale + 'x.svg';
+      link.href = href;
+      link.click();
+      URL.revokeObjectURL(href);
+      render();
+    }
+    function extensionForDataUri(uri) {
+      const match = /^data:([^;,]+)/.exec(uri || '');
+      if (!match) return 'png';
+      if (match[1] === 'image/jpeg' || match[1] === 'image/jpg') return 'jpg';
+      if (match[1] === 'image/webp') return 'webp';
+      return 'png';
+    }
+    function downloadHref(href, filename) {
+      const link = document.createElement('a');
+      link.download = filename;
+      link.href = href;
+      link.click();
+    }
+    function finalBoxRecord() {
+      const records = defaultBoxRecords();
+      for (let i = records.length - 1; i >= 0; i--) {
+        if (records[i].final) return records[i];
+      }
+      return records[records.length - 1] || {bbox: [0, 0, data.imageWidth, data.imageHeight], final: true};
+    }
+    function exportOriginalImage() {
+      const uri = data.originalUri || data.layers[data.layers.length - 1].overlayUri;
+      downloadHref(uri, 'phf_crop_original.' + extensionForDataUri(uri));
+    }
+    function exportFinalCrop() {
+      if (!boxImage.complete || !boxImage.naturalWidth || !boxImage.naturalHeight) return;
+      const bbox = finalBoxRecord().bbox;
+      const scaleX = boxImage.naturalWidth / data.imageWidth;
+      const scaleY = boxImage.naturalHeight / data.imageHeight;
+      const sx = Math.max(0, Math.round(bbox[0] * scaleX));
+      const sy = Math.max(0, Math.round(bbox[1] * scaleY));
+      const sw = Math.max(1, Math.round((bbox[2] - bbox[0]) * scaleX));
+      const sh = Math.max(1, Math.round((bbox[3] - bbox[1]) * scaleY));
+      const cropCanvas = document.createElement('canvas');
+      cropCanvas.width = Math.min(sw, Math.max(1, boxImage.naturalWidth - sx));
+      cropCanvas.height = Math.min(sh, Math.max(1, boxImage.naturalHeight - sy));
+      const cropCtx = cropCanvas.getContext('2d');
+      cropCtx.drawImage(
+        boxImage,
+        sx,
+        sy,
+        cropCanvas.width,
+        cropCanvas.height,
+        0,
+        0,
+        cropCanvas.width,
+        cropCanvas.height
+      );
+      cropCanvas.toBlob(blob => {
+        if (!blob) return;
+        const href = URL.createObjectURL(blob);
+        downloadHref(href, 'phf_crop_final_crop.jpg');
+        URL.revokeObjectURL(href);
+      }, 'image/jpeg', 0.95);
+    }
+    document.getElementById('svg1').onclick=()=>exportSvg(1);
+    document.getElementById('svg2').onclick=()=>exportSvg(2);
+    document.getElementById('svg4').onclick=()=>exportSvg(4);
+    document.getElementById('saveOriginal').onclick=()=>exportOriginalImage();
+    document.getElementById('saveCrop').onclick=()=>exportFinalCrop();
+    render();
+  </script>
+</body>
+</html>

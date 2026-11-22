@@ -1,0 +1,92 @@
+{
+  "version": "phf_crop_final_20260713",
+  "status": "locked",
+  "shared": {
+    "min_crop_side": 336,
+    "initial_heatmap_bootstrap": "tile1024",
+    "high_res_tile_threshold": 1024,
+    "initial_area_ratio": 0.5,
+    "area_ratio_decay": 0.5,
+    "connectivity": 8,
+    "component_score": "peak * mean * log1p(area)",
+    "selection_policy": "top1_hotspot_weighted_centroid",
+    "normalization": "sum_per_contribution",
+    "fusion": "coverage_average",
+    "adaptive_stop_ratio": 1.0,
+    "adaptive_stop_operator": ">=",
+    "final_bbox_semantics": "current_centered_square_crop"
+  },
+  "models": {
+    "llava": {
+      "heatmap": "direct_question_attention",
+      "attention_layer": 14,
+      "topmass": 0.55,
+      "topmass_locked": true,
+      "previous_topmass": 0.35,
+      "answer_input": "original_plus_crop"
+    },
+    "qwen2_5": {
+      "heatmap": "direct_question_attention",
+      "attention_layer": 22,
+      "visual_tokens": 256,
+      "max_pixels": 200704,
+      "topmass": 0.55,
+      "topmass_locked": true,
+      "previous_topmass": 0.4,
+      "answer_input": "original_plus_crop"
+    },
+    "blip": {
+      "heatmap": "question_minus_general_positive_attention",
+      "qformer_layer": 2,
+      "language_model_layer": 15,
+      "background_subtraction_alpha": 1.0,
+      "topmass": 0.55,
+      "topmass_locked": true,
+      "processor_input_side": 224,
+      "answer_input": "crop_only"
+    }
+  },
+  "calibration": {
+    "dataset": "textvqa",
+    "manifest": "outputs/provenance/final_freeze_20260713/calibration_manifest.json",
+    "sample_count": 500,
+    "stratification": "five_gt_target_area_quantiles_100_each",
+    "candidates": [
+      0.2,
+      0.25,
+      0.3,
+      0.35,
+      0.4,
+      0.45,
+      0.5,
+      0.55,
+      0.6
+    ],
+    "primary_metric": "textvqa_package_accuracy",
+    "near_tie_tolerance_points": 0.5,
+    "tie_breakers": [
+      "higher_worst_target_area_quintile_accuracy",
+      "fewer_average_heatmap_forwards",
+      "closer_to_previous_topmass"
+    ],
+    "secondary_dataset": "vstar",
+    "secondary_sample_count": 191,
+    "final_selection_rule": "Use a shared topmass of 0.55 for all supported models.",
+    "final_topmass": {
+      "llava": 0.55,
+      "qwen2_5": 0.55
+    },
+    "unified_across_models": true,
+    "vstar_full_sweep_candidates": [
+      0.2,
+      0.25,
+      0.3,
+      0.35,
+      0.4,
+      0.45,
+      0.5,
+      0.55,
+      0.6
+    ]
+  }
+}
