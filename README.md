@@ -36,8 +36,8 @@ PHF-Crop is a training-free method for visual question answering when the eviden
 Clone the repository and create a Python 3.10 environment. Install a CUDA-compatible PyTorch build for model inference. The [environment notes](ENVIRONMENT.md) give the versions used in the paper.
 
 ```bash
-git clone https://github.com/jingziccc/phf-crop-release.git
-cd phf-crop-release
+git clone https://github.com/jingziccc/phf-crop.git
+cd phf-crop
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
